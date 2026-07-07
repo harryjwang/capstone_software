@@ -1,15 +1,25 @@
 """Live webcam demo: draws face box + emotion overlay. Run: python live_test.py (q to quit)"""
+import time
+
 import cv2
 from cv_service import FaceAnalyzer
 
 analyzer = FaceAnalyzer()
 print(f"detector backend: {analyzer.backend}")
 
-cap = cv2.VideoCapture(0)
+from camera import open_camera
+cap = open_camera()
+
+fails = 0
 while True:
     ok, frame = cap.read()
     if not ok:
-        break
+        fails += 1
+        if fails > 30:
+            raise SystemExit("Camera opened but no frames arrived — check macOS camera permission")
+        time.sleep(0.1)
+        continue
+    fails = 0
     r = analyzer.analyze(frame)
     if r.get("face_found"):
         b = r["box"]

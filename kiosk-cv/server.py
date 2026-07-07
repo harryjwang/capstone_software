@@ -5,6 +5,8 @@ Endpoints:
   POST /scan/face          -> grabs frames from the camera, returns mood result
   POST /scan/face/upload   -> same but on an uploaded image (dev/testing)
 """
+import time
+
 import cv2
 import numpy as np
 from fastapi import FastAPI, UploadFile
@@ -12,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cv_service import FaceAnalyzer, analyze_over_frames
 
-CAMERA_INDEX = 0
+CAMERA_INDEX = None  # None = auto-detect first working camera; set an int to pin it
 N_FRAMES = 8          # frames to majority-vote over
 FRAME_SKIP = 2        # sample every Nth frame
 
@@ -28,11 +30,11 @@ analyzer = FaceAnalyzer()
 
 
 def grab_frames(n=N_FRAMES, skip=FRAME_SKIP):
-    cap = cv2.VideoCapture(CAMERA_INDEX)
-    if not cap.isOpened():
+    from camera import open_camera
+    try:
+        cap = open_camera(preferred=CAMERA_INDEX)
+    except SystemExit:
         return []
-    for _ in range(5):  # discard warm-up frames (often dark/underexposed)
-        cap.read()
     frames, i = [], 0
     while len(frames) < n:
         ok, frame = cap.read()
