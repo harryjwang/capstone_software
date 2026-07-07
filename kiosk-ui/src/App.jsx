@@ -31,13 +31,17 @@ const AMOUNTS = [
 const INTENSITY = ["Light", "Standard", "Strong"];
 const STRENGTH_MULT = [0.75, 1.0, 1.25]; // fraction of the drink's standard ABV
 
-// Emotion → suggested intensity mapping (tune this on the real model)
+// FER+ emotion → suggested intensity (keep keys in sync with backend MOOD_MAP)
+// Negative emotions map lighter by design — never stronger.
 const EMOTION_MAP = {
-  happy:    { intensity: 1, blurb: "Feeling good — standard pour" },
-  stressed: { intensity: 0, blurb: "Rough day — keeping it light" },
-  tired:    { intensity: 0, blurb: "Low energy — easy does it" },
-  excited:  { intensity: 2, blurb: "Celebrating — make it strong" },
-  neutral:  { intensity: 1, blurb: "Balanced — standard pour" },
+  happiness: { intensity: 1, blurb: "Feeling good — standard pour" },
+  surprise: { intensity: 2, blurb: "Something to celebrate — make it strong" },
+  neutral: { intensity: 1, blurb: "Balanced — standard pour" },
+  sadness: { intensity: 0, blurb: "Rough day — keeping it light" },
+  anger: { intensity: 0, blurb: "Take a breath — easy does it" },
+  disgust: { intensity: 0, blurb: "Not feeling it — keeping it light" },
+  fear: { intensity: 0, blurb: "Nerves — easy does it" },
+  contempt: { intensity: 1, blurb: "Unimpressed — standard pour" },
 };
 
 // ─── CV backend integration ──────────────────────────────────────
@@ -512,7 +516,7 @@ export default function DrinkKiosk() {
           background: "#0C0908", color: T.ok, padding: "16px 20px", borderRadius: 12,
           fontSize: 13, lineHeight: 1.7, textAlign: "left", overflow: "auto", marginTop: 10,
         }}>
-{`// MQTT → drinks/orders
+          {`// MQTT → drinks/orders
 ${JSON.stringify(payload, null, 2)}`}
         </pre>
       </details>

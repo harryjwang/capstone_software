@@ -20,27 +20,18 @@ FERPLUS_LABELS = [
 # data), which drowns out sadness/anger/fear. Downweight them so negative
 # emotions can win ties. Tune with live_test.py's on-screen prob readout.
 CLASS_WEIGHTS = {
-    "neutral": 0.4,
-    "happiness": 0.7,
-    "surprise": 0.85,
+    "neutral": 0.12,   # squashed hard — only wins when nothing else registers at all
+    "happiness": 1.6,
+    "surprise": 1.8,
     "sadness": 2.4,
     "anger": 2.2,
     "disgust": 2.2,
     "fear": 2.2,
-    "contempt": 1.0,
+    "contempt": 1.6,
 }
 
-# FER+ emotion -> kiosk mood (keep in sync with EMOTION_MAP in the UI)
-MOOD_MAP = {
-    "happiness": "happy",
-    "surprise": "excited",
-    "neutral": "neutral",
-    "sadness": "tired",
-    "anger": "stressed",
-    "disgust": "stressed",
-    "fear": "stressed",
-    "contempt": "neutral",
-}
+# Using FER+ labels directly as kiosk moods (keep EMOTION_MAP in the UI in sync)
+MOOD_MAP = {l: l for l in FERPLUS_LABELS}
 
 
 class FaceAnalyzer:
