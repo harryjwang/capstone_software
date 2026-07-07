@@ -20,13 +20,13 @@ FERPLUS_LABELS = [
 # data), which drowns out sadness/anger/fear. Downweight them so negative
 # emotions can win ties. Tune with live_test.py's on-screen prob readout.
 CLASS_WEIGHTS = {
-    "neutral": 0.55,
-    "happiness": 0.75,
-    "surprise": 0.9,
-    "sadness": 1.4,
-    "anger": 1.3,
-    "disgust": 1.3,
-    "fear": 1.3,
+    "neutral": 0.4,
+    "happiness": 0.7,
+    "surprise": 0.85,
+    "sadness": 2.4,
+    "anger": 2.2,
+    "disgust": 2.2,
+    "fear": 2.2,
     "contempt": 1.0,
 }
 

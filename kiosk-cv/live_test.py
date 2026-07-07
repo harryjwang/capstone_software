@@ -1,4 +1,5 @@
 """Live webcam demo: draws face box + emotion overlay. Run: python live_test.py (q to quit)"""
+import sys
 import time
 
 import cv2
@@ -8,7 +9,9 @@ analyzer = FaceAnalyzer()
 print(f"detector backend: {analyzer.backend}")
 
 from camera import open_camera
-cap = open_camera()
+# usage: python live_test.py [camera_index]  e.g. `python live_test.py 1`
+idx = int(sys.argv[1]) if len(sys.argv) > 1 else None
+cap = open_camera(preferred=idx)
 
 fails = 0
 while True:
