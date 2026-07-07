@@ -8,17 +8,34 @@ barcode. Canadian DOB format is CCYYMMDD; US is MMDDCCYY — both handled.
 import re
 from datetime import date
 
+import cv2
 import zxingcpp
 
 LEGAL_AGE = 19  # Ontario
 
 
 def decode_pdf417(frame_bgr):
-    """Returns raw AAMVA text if a PDF417 barcode is found, else None."""
-    results = zxingcpp.read_barcodes(frame_bgr)
-    for r in results:
-        if r.format == zxingcpp.BarcodeFormat.PDF417 and r.text:
-            return r.text
+    """Returns raw AAMVA text if a PDF417 barcode is found, else None.
+
+    Tries the raw frame, then grayscale, then 2x upscale — webcam frames of
+    dense PDF417 codes are often right at the edge of readability.
+    """
+    gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
+    candidates = [
+        frame_bgr,
+        gray,
+        cv2.resize(gray, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC),
+    ]
+    for img in candidates:
+        results = zxingcpp.read_barcodes(
+            img,
+            formats=zxingcpp.BarcodeFormat.PDF417,
+            try_rotate=True,
+            try_downscale=True,
+        )
+        for r in results:
+            if r.text:
+                return r.text
     return None
 
 

@@ -21,7 +21,7 @@ from camera import open_camera
 from cv_service import FaceAnalyzer, analyze_over_frames
 from id_service import scan_id_barcode
 
-CAMERA_INDEX = None  # None = auto-detect; pin to an int (e.g. 1 on Mac) if needed
+CAMERA_INDEX = 1  # None = auto-detect; pin to an int (e.g. 1 on Mac) if needed
 N_FRAMES = 8
 FRAME_SKIP = 2
 BARCODE_TIMEOUT_S = 8   # keep trying frames until a barcode decodes
