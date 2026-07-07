@@ -28,6 +28,10 @@ while True:
         label = f'{r["emotion"]} ({r["emotion_raw"]} {r["confidence"]:.2f})'
         cv2.putText(frame, label, (b["x"], b["y"] - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, (61, 163, 232), 2)
+        top3 = sorted(r["probs"].items(), key=lambda kv: -kv[1])[:3]
+        for j, (name, p) in enumerate(top3):
+            cv2.putText(frame, f"{name}: {p:.2f}", (10, 30 + j * 26),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (120, 220, 120), 2)
     cv2.imshow("kiosk-cv live", frame)
     if cv2.waitKey(1) & 0xFF == ord("q"):
         break

@@ -16,6 +16,20 @@ FERPLUS_LABELS = [
     "anger", "disgust", "fear", "contempt",
 ]
 
+# Class weights: FER+ over-predicts neutral/happiness (dominant in its training
+# data), which drowns out sadness/anger/fear. Downweight them so negative
+# emotions can win ties. Tune with live_test.py's on-screen prob readout.
+CLASS_WEIGHTS = {
+    "neutral": 0.55,
+    "happiness": 0.75,
+    "surprise": 0.9,
+    "sadness": 1.4,
+    "anger": 1.3,
+    "disgust": 1.3,
+    "fear": 1.3,
+    "contempt": 1.0,
+}
+
 # FER+ emotion -> kiosk mood (keep in sync with EMOTION_MAP in the UI)
 MOOD_MAP = {
     "happiness": "happy",
@@ -89,6 +103,11 @@ class FaceAnalyzer:
         self.emotion_net.setInput(blob)
         logits = self.emotion_net.forward().flatten()
         probs = np.exp(logits - logits.max())
+        probs /= probs.sum()
+
+        # apply class weights, renormalize
+        w = np.array([CLASS_WEIGHTS[l] for l in FERPLUS_LABELS])
+        probs = probs * w
         probs /= probs.sum()
 
         idx = int(np.argmax(probs))
