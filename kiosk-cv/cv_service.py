@@ -55,7 +55,46 @@ class FaceAnalyzer:
             cv2.dnn.readNetFromONNX(str(emo_path)) if emo_path.exists() else None
         )
 
+        # SFace recognizer for ID<->live face matching (requires yunet backend
+        # because alignCrop needs the 5 facial landmarks yunet provides)
+        sface_path = MODELS_DIR / "sface.onnx"
+        self.recognizer = (
+            cv2.FaceRecognizerSF.create(str(sface_path), "")
+            if sface_path.exists() and self.backend == "yunet" else None
+        )
+        # OpenCV's validated cosine-similarity threshold for SFace
+        self.match_threshold = 0.363
+
     # ── detection ────────────────────────────────────────────────
+    def detect_faces_raw(self, frame_bgr):
+        """YuNet raw detection rows (needed for SFace alignment). Largest first."""
+        if self.backend != "yunet":
+            return []
+        h, w = frame_bgr.shape[:2]
+        self.detector.setInputSize((w, h))
+        _, faces = self.detector.detect(frame_bgr)
+        if faces is None:
+            return []
+        return sorted(faces, key=lambda f: f[2] * f[3], reverse=True)
+
+    def get_embedding(self, frame_bgr):
+        """Largest face in frame -> 128-d SFace embedding, or None."""
+        if self.recognizer is None:
+            return None
+        rows = self.detect_faces_raw(frame_bgr)
+        if not len(rows):
+            return None
+        aligned = self.recognizer.alignCrop(frame_bgr, rows[0])
+        return self.recognizer.feature(aligned)
+
+    def match_embeddings(self, feat_a, feat_b):
+        """Cosine similarity + pass/fail against OpenCV's SFace threshold."""
+        score = float(self.recognizer.match(
+            feat_a, feat_b, cv2.FaceRecognizerSF_FR_COSINE))
+        return {"match": score >= self.match_threshold,
+                "match_score": round(score, 3),
+                "threshold": self.match_threshold}
+
     def detect_faces(self, frame_bgr):
         """Returns list of (x, y, w, h, det_conf), largest face first."""
         if self.backend == "yunet":

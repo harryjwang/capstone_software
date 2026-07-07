@@ -35,13 +35,13 @@ const STRENGTH_MULT = [0.75, 1.0, 1.25]; // fraction of the drink's standard ABV
 // Negative emotions map lighter by design — never stronger.
 const EMOTION_MAP = {
   happiness: { intensity: 1, blurb: "Feeling good — standard pour" },
-  surprise: { intensity: 2, blurb: "Something to celebrate — make it strong" },
-  neutral: { intensity: 1, blurb: "Balanced — standard pour" },
-  sadness: { intensity: 0, blurb: "Rough day — keeping it light" },
-  anger: { intensity: 0, blurb: "Take a breath — easy does it" },
-  disgust: { intensity: 0, blurb: "Not feeling it — keeping it light" },
-  fear: { intensity: 0, blurb: "Nerves — easy does it" },
-  contempt: { intensity: 1, blurb: "Unimpressed — standard pour" },
+  surprise:  { intensity: 2, blurb: "Something to celebrate — make it strong" },
+  neutral:   { intensity: 1, blurb: "Balanced — standard pour" },
+  sadness:   { intensity: 0, blurb: "Rough day — keeping it light" },
+  anger:     { intensity: 0, blurb: "Take a breath — easy does it" },
+  disgust:   { intensity: 0, blurb: "Not feeling it — keeping it light" },
+  fear:      { intensity: 0, blurb: "Nerves — easy does it" },
+  contempt:  { intensity: 1, blurb: "Unimpressed — standard pour" },
 };
 
 // ─── CV backend integration ──────────────────────────────────────
@@ -54,11 +54,14 @@ async function scanFace() {
     const res = await fetch(`${CV_BACKEND}/scan/face`, { method: "POST" });
     const d = await res.json();
     if (d.face_found && d.emotion) {
+      const hasRealMatch = d.match !== null && d.match !== undefined;
       return {
-        match: true,          // still simulated — ID↔face matching comes later
-        matchScore: 0.91,
-        emotion: d.emotion,   // real emotion from FER+
-        emotionRaw: d.emotion_raw,
+        // real ID<->face match when the backend has an ID portrait stored;
+        // simulated pass otherwise
+        match: hasRealMatch ? d.match : true,
+        matchScore: hasRealMatch ? d.match_score : 0.91,
+        matchIsReal: hasRealMatch,
+        emotion: d.emotion,
         confidence: d.confidence,
         source: "live",
       };
@@ -68,6 +71,33 @@ async function scanFace() {
   } catch (e) { /* backend not running — use simulation */ }
   const r = await simulateFaceScan();
   return { ...r, source: "simulated" };
+}
+
+async function scanIdBarcode() {
+  try {
+    const res = await fetch(`${CV_BACKEND}/scan/id/barcode`, { method: "POST" });
+    const d = await res.json();
+    if (d.found) {
+      return { ofAge: d.of_age, age: d.age, name: d.name, confidence: 1.0, source: "live" };
+    }
+    return { failed: true, error: d.error, source: "live" };
+  } catch (e) { /* backend not running — use simulation */ }
+  const r = await simulateIdScan();
+  return { ...r, source: "simulated" };
+}
+
+async function scanIdPortrait() {
+  try {
+    const res = await fetch(`${CV_BACKEND}/scan/id/portrait`, { method: "POST" });
+    const d = await res.json();
+    return d.found ? { ok: true } : { ok: false, error: d.error };
+  } catch (e) {
+    return { ok: true, simulated: true }; // no backend — skip portrait step
+  }
+}
+
+function resetCvSession() {
+  fetch(`${CV_BACKEND}/session/reset`, { method: "POST" }).catch(() => {});
 }
 
 // ─── Simulated CV stubs — swap for fetch() calls to the Pi backend ──
@@ -208,6 +238,7 @@ export default function DrinkKiosk() {
   const [screen, setScreen] = useState("attract");
   // Session state — persists across back/forward navigation until reset()
   const [idResult, setIdResult] = useState(null);
+  const [portraitDone, setPortraitDone] = useState(false);
   const [faceResult, setFaceResult] = useState(null);
   const [drink, setDrink] = useState(null);
   const [amount, setAmount] = useState(null);
@@ -219,12 +250,31 @@ export default function DrinkKiosk() {
 
   const addLog = (msg) => setLog((l) => [...l.slice(-6), `${new Date().toLocaleTimeString()}  ${msg}`]);
 
-  const runIdScan = async () => {
+  const runIdBarcode = async () => {
     setScanning(true);
-    const r = await simulateIdScan();
+    const r = await scanIdBarcode();
     setScanning(false);
+    if (r.failed) {
+      setIdResult({ failed: true, error: r.error, source: r.source });
+      addLog(`ID barcode failed: ${r.error}`);
+      return;
+    }
     setIdResult(r);
-    addLog(`ID verified: age ${r.age} (conf ${r.confidence})`);
+    if (r.source === "simulated") setPortraitDone(true); // no backend — skip portrait
+    addLog(`[${r.source}] ID: age ${r.age}, of_age=${r.ofAge}`);
+  };
+
+  const runIdPortrait = async () => {
+    setScanning(true);
+    const r = await scanIdPortrait();
+    setScanning(false);
+    if (r.ok) {
+      setPortraitDone(true);
+      addLog(r.simulated ? "Portrait step skipped (sim)" : "ID portrait captured");
+    } else {
+      addLog(`Portrait failed: ${r.error}`);
+      setIdResult({ ...idResult, portraitError: r.error });
+    }
   };
 
   const runFaceScan = async () => {
@@ -265,7 +315,8 @@ export default function DrinkKiosk() {
   }, [progress, screen]);
 
   const reset = () => {
-    setScreen("attract"); setIdResult(null); setFaceResult(null);
+    resetCvSession();
+    setScreen("attract"); setIdResult(null); setFaceResult(null); setPortraitDone(false);
     setDrink(null); setAmount(null); setIntensity(1); setUseMood(false); setLog([]);
   };
 
@@ -301,25 +352,52 @@ export default function DrinkKiosk() {
   const renderIdScan = () => (
     <Step eyebrow="Step 1 of 4" title="Scan your ID">
       {scanning ? (
-        <ScanRing label="Hold ID barcode up to the camera…" />
-      ) : idResult ? (
+        <ScanRing label={!idResult ? "Hold the BACK of your ID (barcode) up to the camera…" : "Now hold the FRONT of your ID (photo side) up to the camera…"} />
+      ) : idResult?.failed ? (
         <ResultCard
-          icon={idResult.ofAge ? "✅" : "⛔"}
-          title={idResult.ofAge ? "Verified — 19+" : "Under age"}
-          lines={[`Age ${idResult.age} · confidence ${idResult.confidence}`]}
-          onRescan={() => { setIdResult(null); setFaceResult(null); }}
+          icon="🪪"
+          title="Couldn't read the barcode"
+          lines={[idResult.error || "Hold the ID steady and fill the frame."]}
+          onRescan={() => setIdResult(null)}
+        />
+      ) : idResult && !portraitDone ? (
+        <div>
+          <ResultCard
+            icon={idResult.ofAge ? "✅" : "⛔"}
+            title={idResult.ofAge ? "Verified — 19+" : "Under age"}
+            lines={[
+              `Age ${idResult.age}${idResult.name ? ` · ${idResult.name}` : ""}`,
+              idResult.portraitError || "Step 2: flip your ID to the photo side.",
+            ]}
+            onRescan={() => { setIdResult(null); setFaceResult(null); setPortraitDone(false); }}
+          />
+          {idResult.ofAge && (
+            <div style={{ marginTop: 22 }}>
+              <Btn big onClick={runIdPortrait}>Scan ID Photo (front)</Btn>
+            </div>
+          )}
+        </div>
+      ) : idResult && portraitDone ? (
+        <ResultCard
+          icon="✅"
+          title="ID verified — 19+"
+          lines={[
+            `Age ${idResult.age}${idResult.name ? ` · ${idResult.name}` : ""}`,
+            idResult.source === "live" ? "Barcode + photo captured · ● Live" : "○ Simulated result",
+          ]}
+          onRescan={() => { setIdResult(null); setFaceResult(null); setPortraitDone(false); }}
         />
       ) : (
         <div>
-          <div style={{ color: T.mute, fontSize: 17, maxWidth: 420, margin: "0 auto 30px" }}>
-            Place the back of your ID (barcode side) in front of the camera. We check your date of birth and capture your ID photo to verify it's really you. Nothing is stored.
+          <div style={{ color: T.mute, fontSize: 17, maxWidth: 440, margin: "0 auto 30px" }}>
+            Two quick scans: the barcode on the back of your ID (checks your date of birth), then the photo on the front (to verify it's really you). Nothing is stored after your order.
           </div>
-          <Btn big onClick={runIdScan}>Start ID Scan</Btn>
+          <Btn big onClick={runIdBarcode}>Scan ID Barcode (back)</Btn>
         </div>
       )}
       <Footer>
         <Btn ghost onClick={reset}>Cancel Order</Btn>
-        <Btn big disabled={!idResult?.ofAge || scanning} onClick={() => setScreen("facescan")}>Continue</Btn>
+        <Btn big disabled={!idResult?.ofAge || !portraitDone || scanning} onClick={() => setScreen("facescan")}>Continue</Btn>
       </Footer>
     </Step>
   );
@@ -345,7 +423,9 @@ export default function DrinkKiosk() {
               lines={[
                 `Face matches ID photo`,
                 `Mood detected: ${cap(faceResult.emotion)} — "${em.blurb}"`,
-                faceResult.source === "live" ? "● Live camera result" : "○ Simulated result",
+                faceResult.source === "live"
+                  ? (faceResult.matchIsReal ? "● Live · real ID match" : "● Live emotion · match simulated")
+                  : "○ Simulated result",
               ]}
               onRescan={() => setFaceResult(null)}
             />
@@ -516,7 +596,7 @@ export default function DrinkKiosk() {
           background: "#0C0908", color: T.ok, padding: "16px 20px", borderRadius: 12,
           fontSize: 13, lineHeight: 1.7, textAlign: "left", overflow: "auto", marginTop: 10,
         }}>
-          {`// MQTT → drinks/orders
+{`// MQTT → drinks/orders
 ${JSON.stringify(payload, null, 2)}`}
         </pre>
       </details>
