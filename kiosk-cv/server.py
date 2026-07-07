@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from cv_service import FaceAnalyzer, analyze_over_frames
 
-CAMERA_INDEX = None  # None = auto-detect first working camera; set an int to pin it
+CAMERA_INDEX = 1  # None = auto-detect first working camera; set an int to pin it
 N_FRAMES = 8          # frames to majority-vote over
 FRAME_SKIP = 2        # sample every Nth frame
 
