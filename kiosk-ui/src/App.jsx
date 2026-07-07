@@ -35,13 +35,13 @@ const STRENGTH_MULT = [0.75, 1.0, 1.25]; // fraction of the drink's standard ABV
 // Negative emotions map lighter by design — never stronger.
 const EMOTION_MAP = {
   happiness: { intensity: 1, blurb: "Feeling good — standard pour" },
-  surprise:  { intensity: 2, blurb: "Something to celebrate — make it strong" },
-  neutral:   { intensity: 1, blurb: "Balanced — standard pour" },
-  sadness:   { intensity: 0, blurb: "Rough day — keeping it light" },
-  anger:     { intensity: 0, blurb: "Take a breath — easy does it" },
-  disgust:   { intensity: 0, blurb: "Not feeling it — keeping it light" },
-  fear:      { intensity: 0, blurb: "Nerves — easy does it" },
-  contempt:  { intensity: 1, blurb: "Unimpressed — standard pour" },
+  surprise: { intensity: 2, blurb: "Something to celebrate — make it strong" },
+  neutral: { intensity: 1, blurb: "Balanced — standard pour" },
+  sadness: { intensity: 0, blurb: "Rough day — keeping it light" },
+  anger: { intensity: 0, blurb: "Take a breath — easy does it" },
+  disgust: { intensity: 0, blurb: "Not feeling it — keeping it light" },
+  fear: { intensity: 0, blurb: "Nerves — easy does it" },
+  contempt: { intensity: 1, blurb: "Unimpressed — standard pour" },
 };
 
 // ─── CV backend integration ──────────────────────────────────────
@@ -97,7 +97,7 @@ async function scanIdPortrait() {
 }
 
 function resetCvSession() {
-  fetch(`${CV_BACKEND}/session/reset`, { method: "POST" }).catch(() => {});
+  fetch(`${CV_BACKEND}/session/reset`, { method: "POST" }).catch(() => { });
 }
 
 // ─── Simulated CV stubs — swap for fetch() calls to the Pi backend ──
@@ -399,6 +399,19 @@ export default function DrinkKiosk() {
         <Btn ghost onClick={reset}>Cancel Order</Btn>
         <Btn big disabled={!idResult?.ofAge || !portraitDone || scanning} onClick={() => setScreen("facescan")}>Continue</Btn>
       </Footer>
+      {/* DEV ONLY — remove for the real kiosk build */}
+      <button
+        onClick={() => {
+          setIdResult({ ofAge: true, age: 23, name: "Dev Skip", source: "skipped" });
+          setPortraitDone(true);
+          setScreen("facescan");
+        }}
+        style={{
+          marginTop: 26, background: "none", border: "none", cursor: "pointer",
+          color: T.mute, fontSize: 13, textDecoration: "underline", fontFamily: "inherit",
+        }}>
+        Skip ID verification (dev)
+      </button>
     </Step>
   );
 
@@ -596,7 +609,7 @@ export default function DrinkKiosk() {
           background: "#0C0908", color: T.ok, padding: "16px 20px", borderRadius: 12,
           fontSize: 13, lineHeight: 1.7, textAlign: "left", overflow: "auto", marginTop: 10,
         }}>
-{`// MQTT → drinks/orders
+          {`// MQTT → drinks/orders
 ${JSON.stringify(payload, null, 2)}`}
         </pre>
       </details>

@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+*.egg-info/
+
+# CV models (large binaries — regenerate with download_models.py)
+kiosk-cv/models/*.onnx
+
+# Generated test assets
+kiosk-cv/test_id_barcode.png
+
+# Node / Vite
+node_modules/
+dist/
+*.local
+
+# Environment / secrets
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+.vscode/
+.idea/
+
+# Logs
+*.log
+npm-debug.log*
