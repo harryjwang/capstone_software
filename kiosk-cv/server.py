@@ -17,11 +17,13 @@ import numpy as np
 from fastapi import FastAPI, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-from camera import open_camera
+from fastapi.responses import StreamingResponse
+
+from camera_manager import CameraManager
 from cv_service import FaceAnalyzer, analyze_over_frames
 from id_service import scan_id_barcode
 
-CAMERA_INDEX = 1  # None = auto-detect; pin to an int (e.g. 1 on Mac) if needed
+CAMERA_INDEX = None  # None = auto-detect; pin to an int (e.g. 1 on Mac) if needed
 N_FRAMES = 8
 FRAME_SKIP = 2
 BARCODE_TIMEOUT_S = 8   # keep trying frames until a barcode decodes
@@ -36,34 +38,37 @@ app.add_middleware(
 )
 
 analyzer = FaceAnalyzer()
+manager = CameraManager(preferred=CAMERA_INDEX)
 
 # Single-kiosk session state (one customer at a time)
 SESSION = {"id_info": None, "id_embedding": None}
 
 
-def _camera():
-    try:
-        return open_camera(preferred=CAMERA_INDEX)
-    except SystemExit:
-        return None
-
-
 def grab_frames(n=N_FRAMES, skip=FRAME_SKIP):
-    cap = _camera()
-    if cap is None:
-        return []
-    frames, i = [], 0
-    while len(frames) < n:
-        ok, frame = cap.read()
-        if not ok:
-            break
-        if i % skip == 0:
-            frames.append(frame)
-        i += 1
-        if i > n * skip * 3:
-            break
-    cap.release()
+    """Sample n frames over ~1s from the shared camera."""
+    frames = []
+    for _ in range(n):
+        f = manager.get_frame()
+        if f is not None:
+            frames.append(f)
+        time.sleep(0.12)
     return frames
+
+
+@app.get("/camera/stream")
+def camera_stream():
+    """MJPEG preview stream for the kiosk UI."""
+    def gen():
+        while True:
+            f = manager.get_frame()
+            if f is None:
+                break
+            ok, jpg = cv2.imencode(".jpg", f, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+            if ok:
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"
+                       + jpg.tobytes() + b"\r\n")
+            time.sleep(1 / 15)
+    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.post("/session/reset")
@@ -76,19 +81,15 @@ def session_reset():
 @app.post("/scan/id/barcode")
 def scan_barcode():
     """Keep reading frames until the PDF417 on the ID back decodes (or timeout)."""
-    cap = _camera()
-    if cap is None:
-        return {"found": False, "error": "camera unavailable"}
     deadline = time.time() + BARCODE_TIMEOUT_S
     info = None
     while time.time() < deadline:
-        ok, frame = cap.read()
-        if not ok:
-            continue
+        frame = manager.get_frame()
+        if frame is None:
+            return {"found": False, "error": "camera unavailable"}
         info = scan_id_barcode(frame)
         if info:
             break
-    cap.release()
     if not info:
         return {"found": False, "error": "no readable barcode — hold the back of the ID steady, fill the frame"}
     SESSION["id_info"] = info
@@ -100,19 +101,15 @@ def scan_portrait():
     """Capture the portrait photo on the ID front, store its face embedding."""
     if analyzer.recognizer is None:
         return {"found": False, "error": "sface.onnx missing — run download_models.py"}
-    cap = _camera()
-    if cap is None:
-        return {"found": False, "error": "camera unavailable"}
     deadline = time.time() + PORTRAIT_TIMEOUT_S
     emb = None
     while time.time() < deadline:
-        ok, frame = cap.read()
-        if not ok:
-            continue
+        frame = manager.get_frame()
+        if frame is None:
+            return {"found": False, "error": "camera unavailable"}
         emb = analyzer.get_embedding(frame)
         if emb is not None:
             break
-    cap.release()
     if emb is None:
         return {"found": False, "error": "no face found on ID — hold the front closer to the camera"}
     SESSION["id_embedding"] = emb

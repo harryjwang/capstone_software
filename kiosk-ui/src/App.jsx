@@ -35,13 +35,13 @@ const STRENGTH_MULT = [0.75, 1.0, 1.25]; // fraction of the drink's standard ABV
 // Negative emotions map lighter by design — never stronger.
 const EMOTION_MAP = {
   happiness: { intensity: 1, blurb: "Feeling good — standard pour" },
-  surprise: { intensity: 2, blurb: "Something to celebrate — make it strong" },
-  neutral: { intensity: 1, blurb: "Balanced — standard pour" },
-  sadness: { intensity: 0, blurb: "Rough day — keeping it light" },
-  anger: { intensity: 0, blurb: "Take a breath — easy does it" },
-  disgust: { intensity: 0, blurb: "Not feeling it — keeping it light" },
-  fear: { intensity: 0, blurb: "Nerves — easy does it" },
-  contempt: { intensity: 1, blurb: "Unimpressed — standard pour" },
+  surprise:  { intensity: 2, blurb: "Something to celebrate — make it strong" },
+  neutral:   { intensity: 1, blurb: "Balanced — standard pour" },
+  sadness:   { intensity: 0, blurb: "Rough day — keeping it light" },
+  anger:     { intensity: 0, blurb: "Take a breath — easy does it" },
+  disgust:   { intensity: 0, blurb: "Not feeling it — keeping it light" },
+  fear:      { intensity: 0, blurb: "Nerves — easy does it" },
+  contempt:  { intensity: 1, blurb: "Unimpressed — standard pour" },
 };
 
 // ─── CV backend integration ──────────────────────────────────────
@@ -73,17 +73,30 @@ async function scanFace() {
   return { ...r, source: "simulated" };
 }
 
-async function scanIdBarcode() {
-  try {
-    const res = await fetch(`${CV_BACKEND}/scan/id/barcode`, { method: "POST" });
-    const d = await res.json();
-    if (d.found) {
-      return { ofAge: d.of_age, age: d.age, name: d.name, confidence: 1.0, source: "live" };
-    }
-    return { failed: true, error: d.error, source: "live" };
-  } catch (e) { /* backend not running — use simulation */ }
-  const r = await simulateIdScan();
-  return { ...r, source: "simulated" };
+// Parse AAMVA text from a hardware barcode scanner (HID keyboard mode).
+// The scanner "types" the ID's PDF417 contents; we regex out the fields.
+const LEGAL_AGE = 19; // Ontario
+function parseAamva(text) {
+  const get = (code) => {
+    const m = text.match(new RegExp(code + "([^\\n\\r<]+)"));
+    return m ? m[1].trim() : null;
+  };
+  const dobRaw = get("DBB");
+  if (!dobRaw || !/^\d{8}/.test(dobRaw)) return null;
+  const d8 = dobRaw.slice(0, 8);
+  let y, mo, da;
+  if (d8.slice(0, 2) === "19" || d8.slice(0, 2) === "20") {
+    y = +d8.slice(0, 4); mo = +d8.slice(4, 6); da = +d8.slice(6, 8);   // Canada: CCYYMMDD
+  } else {
+    mo = +d8.slice(0, 2); da = +d8.slice(2, 4); y = +d8.slice(4, 8);   // US: MMDDCCYY
+  }
+  const now = new Date();
+  let age = now.getFullYear() - y;
+  if (now.getMonth() + 1 < mo || (now.getMonth() + 1 === mo && now.getDate() < da)) age--;
+  const first = get("DAC") || "";
+  const last = get("DCS") || "";
+  const name = last ? `${first.slice(0, 1)}. ${last.slice(0, 1).toUpperCase()}${last.slice(1).toLowerCase()}` : "";
+  return { ofAge: age >= LEGAL_AGE, age, name };
 }
 
 async function scanIdPortrait() {
@@ -97,7 +110,7 @@ async function scanIdPortrait() {
 }
 
 function resetCvSession() {
-  fetch(`${CV_BACKEND}/session/reset`, { method: "POST" }).catch(() => { });
+  fetch(`${CV_BACKEND}/session/reset`, { method: "POST" }).catch(() => {});
 }
 
 // ─── Simulated CV stubs — swap for fetch() calls to the Pi backend ──
@@ -137,10 +150,10 @@ function Btn({ children, onClick, big, ghost, disabled, style }) {
       disabled={disabled}
       style={{
         fontFamily: "inherit",
-        fontSize: big ? 26 : 18,
+        fontSize: big ? "clamp(20px, 3vh, 26px)" : 18,
         fontWeight: 700,
         letterSpacing: "0.04em",
-        padding: big ? "22px 48px" : "14px 28px",
+        padding: big ? "clamp(14px, 2.5vh, 22px) clamp(32px, 5vw, 48px)" : "14px 28px",
         minHeight: 64,
         borderRadius: 14,
         border: ghost ? `2px solid ${T.mute}` : "none",
@@ -164,6 +177,25 @@ function Eyebrow({ children }) {
   return (
     <div style={{ color: T.copper, fontSize: 14, fontWeight: 700, letterSpacing: "0.28em", textTransform: "uppercase", marginBottom: 10 }}>
       {children}
+    </div>
+  );
+}
+
+function CameraFeed({ label }) {
+  const [err, setErr] = useState(false);
+  if (err) return <ScanRing label={label} />;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+      <img
+        src={`${CV_BACKEND}/camera/stream`}
+        onError={() => setErr(true)}
+        alt="camera preview"
+        style={{
+          width: "min(400px, 70vw)", borderRadius: 18,
+          border: `3px solid ${T.amber}`, boxShadow: `0 0 30px ${T.amber}33`,
+        }}
+      />
+      <div style={{ color: T.mute, fontSize: 16 }}>{label}</div>
     </div>
   );
 }
@@ -250,19 +282,44 @@ export default function DrinkKiosk() {
 
   const addLog = (msg) => setLog((l) => [...l.slice(-6), `${new Date().toLocaleTimeString()}  ${msg}`]);
 
-  const runIdBarcode = async () => {
-    setScanning(true);
-    const r = await scanIdBarcode();
-    setScanning(false);
-    if (r.failed) {
-      setIdResult({ failed: true, error: r.error, source: r.source });
-      addLog(`ID barcode failed: ${r.error}`);
-      return;
-    }
-    setIdResult(r);
-    if (r.source === "simulated") setPortraitDone(true); // no backend — skip portrait
-    addLog(`[${r.source}] ID: age ${r.age}, of_age=${r.ofAge}`);
-  };
+  // Hardware barcode scanner input (HID keyboard mode): while the ID screen is
+  // waiting, buffer keystrokes; a scan arrives as a fast burst ending in Enter.
+  // Dev shortcut: pasting AAMVA text (Cmd+V) works too.
+  useEffect(() => {
+    if (screen !== "idscan" || idResult || scanning) return;
+    let buf = "";
+    let timer = null;
+    const finish = () => {
+      const text = buf; buf = "";
+      if (text.length < 20) return; // ignore stray typing
+      const parsed = parseAamva(text);
+      if (parsed) {
+        setIdResult({ ...parsed, source: "scanner" });
+        addLog(`[scanner] ID: age ${parsed.age}, of_age=${parsed.ofAge}`);
+      } else {
+        setIdResult({ failed: true, error: "Couldn't parse the ID data — try scanning again." });
+        addLog("Scanner data didn't parse as AAMVA");
+      }
+    };
+    const onKey = (e) => {
+      if (e.key === "Enter") buf += "\n";
+      else if (e.key.length === 1) buf += e.key;
+      clearTimeout(timer);
+      timer = setTimeout(finish, 300);
+    };
+    const onPaste = (e) => {
+      buf += e.clipboardData.getData("text");
+      clearTimeout(timer);
+      timer = setTimeout(finish, 100);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("paste", onPaste);
+      clearTimeout(timer);
+    };
+  }, [screen, idResult, scanning]);
 
   const runIdPortrait = async () => {
     setScanning(true);
@@ -340,7 +397,7 @@ export default function DrinkKiosk() {
   const renderAttract = () => (
     <Center>
       <div style={{ fontSize: 15, letterSpacing: "0.4em", color: T.copper, textTransform: "uppercase" }}>Autonomous Bartender</div>
-      <h1 style={{ fontSize: 76, margin: "18px 0 6px", color: T.cream, fontWeight: 800, letterSpacing: "-0.02em" }}>
+      <h1 style={{ fontSize: "clamp(44px, 8vw, 76px)", margin: "14px 0 6px", color: T.cream, fontWeight: 800, letterSpacing: "-0.02em" }}>
         POUR<span style={{ color: T.amber }}>DECISIONS</span>
       </h1>
       <div style={{ color: T.mute, fontSize: 20, marginBottom: 48 }}>Five drinks. Zero judgment.</div>
@@ -352,7 +409,7 @@ export default function DrinkKiosk() {
   const renderIdScan = () => (
     <Step eyebrow="Step 1 of 4" title="Scan your ID">
       {scanning ? (
-        <ScanRing label={!idResult ? "Hold the BACK of your ID (barcode) up to the camera…" : "Now hold the FRONT of your ID (photo side) up to the camera…"} />
+        <CameraFeed label="Hold the FRONT of your ID (photo side) up to the camera" />
       ) : idResult?.failed ? (
         <ResultCard
           icon="🪪"
@@ -389,10 +446,19 @@ export default function DrinkKiosk() {
         />
       ) : (
         <div>
-          <div style={{ color: T.mute, fontSize: 17, maxWidth: 440, margin: "0 auto 30px" }}>
-            Two quick scans: the barcode on the back of your ID (checks your date of birth), then the photo on the front (to verify it's really you). Nothing is stored after your order.
+          <div style={{ color: T.mute, fontSize: 17, maxWidth: 460, margin: "0 auto 26px" }}>
+            Scan the barcode on the back of your ID using the scanner below the screen. We check your date of birth, then capture the photo on the front to verify it's really you. Nothing is stored after your order.
           </div>
-          <Btn big onClick={runIdBarcode}>Scan ID Barcode (back)</Btn>
+          <div style={{
+            display: "inline-flex", alignItems: "center", gap: 14,
+            background: T.panel, borderRadius: 16, padding: "18px 30px",
+          }}>
+            <span style={{
+              width: 12, height: 12, borderRadius: "50%", background: T.amber,
+              animation: "pulse 1.2s ease-in-out infinite",
+            }} />
+            <span style={{ fontSize: 18, fontWeight: 700 }}>Waiting for scan…</span>
+          </div>
         </div>
       )}
       <Footer>
@@ -420,7 +486,7 @@ export default function DrinkKiosk() {
     return (
       <Step eyebrow="Step 2 of 4" title="Verify it's you">
         {scanning ? (
-          <ScanRing label="Matching against your ID photo…" />
+          <CameraFeed label="Look at the camera…" />
         ) : faceResult ? (
           faceResult.noFace ? (
             <ResultCard
@@ -468,14 +534,14 @@ export default function DrinkKiosk() {
 
   const renderDrinks = () => (
     <Step eyebrow="Step 3 of 4" title="Pick your drink">
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16, width: "100%", maxWidth: 900 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(128px, 1fr))", gap: 12, width: "100%", maxWidth: 900 }}>
         {DRINKS.map((d) => {
           const sel = drink?.id === d.id;
           return (
             <button key={d.id} onClick={() => setDrink(d)}
               style={{
-                fontFamily: "inherit", cursor: "pointer", padding: "22px 12px 18px",
-                borderRadius: 18, minHeight: 190,
+                fontFamily: "inherit", cursor: "pointer", padding: "16px 10px 14px",
+                borderRadius: 18, minHeight: 160,
                 background: sel ? T.panelHi : T.panel,
                 border: sel ? `3px solid ${T.amber}` : `3px solid transparent`,
                 color: T.cream, transition: "border 0.15s ease",
@@ -509,12 +575,12 @@ export default function DrinkKiosk() {
               <button key={a.id} onClick={() => setAmount(a)}
                 style={{
                   fontFamily: "inherit", cursor: "pointer",
-                  width: 200, padding: "24px 12px 18px", borderRadius: 18,
+                  width: "clamp(140px, 22vw, 200px)", padding: "18px 10px 14px", borderRadius: 18,
                   background: sel ? T.panelHi : T.panel,
                   border: sel ? `3px solid ${T.amber}` : "3px solid transparent",
                   color: T.cream,
                 }}>
-                <Glass fill={a.fill} hue={drink?.hue || T.amber} height={140} />
+                <Glass fill={a.fill} hue={drink?.hue || T.amber} height={110} />
                 <div style={{ fontSize: 21, fontWeight: 800, marginTop: 14 }}>{a.label}</div>
                 <div style={{ fontSize: 13, color: T.mute, marginTop: 4 }}>{a.ml} mL</div>
               </button>
@@ -609,7 +675,7 @@ export default function DrinkKiosk() {
           background: "#0C0908", color: T.ok, padding: "16px 20px", borderRadius: 12,
           fontSize: 13, lineHeight: 1.7, textAlign: "left", overflow: "auto", marginTop: 10,
         }}>
-          {`// MQTT → drinks/orders
+{`// MQTT → drinks/orders
 ${JSON.stringify(payload, null, 2)}`}
         </pre>
       </details>
@@ -655,7 +721,8 @@ ${JSON.stringify(payload, null, 2)}`}
       fontFamily: "'Avenir Next', 'Segoe UI', system-ui, sans-serif",
       display: "flex", flexDirection: "column",
     }}>
-      <style>{`@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }`}</style>
+      <style>{`@keyframes spin { from { transform: rotate(0) } to { transform: rotate(360deg) } }
+@keyframes pulse { 0%,100% { opacity: 1; transform: scale(1) } 50% { opacity: 0.35; transform: scale(0.8) } }`}</style>
       {screens[screen]()}
     </div>
   );
@@ -673,15 +740,15 @@ function Center({ children }) {
 }
 function Step({ eyebrow, title, children }) {
   return (
-    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "40px 24px", textAlign: "center" }}>
+    <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "24px 20px", textAlign: "center" }}>
       <Eyebrow>{eyebrow}</Eyebrow>
-      <h2 style={{ fontSize: 40, margin: "0 0 36px", fontWeight: 800 }}>{title}</h2>
+      <h2 style={{ fontSize: "clamp(26px, 4.5vh, 40px)", margin: "0 0 clamp(16px, 3vh, 36px)", fontWeight: 800 }}>{title}</h2>
       {children}
     </div>
   );
 }
 function Footer({ children }) {
-  return <div style={{ display: "flex", gap: 18, marginTop: 44 }}>{children}</div>;
+  return <div style={{ display: "flex", gap: 16, marginTop: "clamp(20px, 4vh, 44px)" }}>{children}</div>;
 }
 function SummaryRow({ label, value, last }) {
   return (
